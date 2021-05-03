@@ -23,9 +23,7 @@ void*json_text_push(json_text*c,size_t sz){
 		if(c->stack==NULL)c->stack=new char[c->sz];
 		else{
 			char*t=new char[c->sz];
-			memcpy(t,c->stack,c->top);
-			delete c->stack;
-			c->stack=t;
+			memcpy(t,c->stack,c->top);delete c->stack;c->stack=t;
 		}
 		#endif
 	}
@@ -47,6 +45,17 @@ int json_parse_literal(json_text*c,json_value*v,const char*literal,const json_ty
 	for(;literal[i];++i)if(literal[i]!=c->json[i-1])return JSON_PARSE_INVALID_VALUE;
 	c->json+=i-1,v->type=type;
 	return JSON_PARSE_OK;
+}
+const char*json_parse_hex(const char*p,unsigned&u){
+	u=0;
+	for(int i=0;i<4;++i){
+		char ch=*p++;u<<=4;
+		if(ch>='0'&&ch<='9')u|=ch-'0';
+		else if(ch>='A'&&ch<='F')u|=ch-'A'+10;
+		else if(ch>='a'&&ch<='f')u|=ch-'a'+10;
+		else return NULL;
+	}
+	return p;
 }
 
 int json_parse_number(json_text*c,json_value*v){
@@ -73,36 +82,44 @@ int json_parse_number(json_text*c,json_value*v){
 	c->json=p,v->type=JSON_NUMBER;
 	return JSON_PARSE_OK;
 }
-#define PUTC(c,ch) do{*(char*)json_text_push(c,1)=(ch);}while(0)
+#define PUTC(c,ch) do{*(char*)json_text_push(c,1)=(char)(ch);}while(0)
+#define STRING_ERROR(ret) do{c->top=pre;return ret;}while(0)
+void json_utf8(json_text*c,unsigned u){
+	if(u<=0x7F)PUTC(c,u);
+	else if(u<=0x7FF){PUTC(c,u>>6|0xC0);PUTC(c,(u&0x3F)|0x80);}
+	else if(u<=0xFFFF){PUTC(c,u>>12|0xE0);PUTC(c,((u>>6)&0x3f)|0x80);PUTC(c,(u&0x3f)|0x80);}
+	else{assert(u<=0x10FFFF);PUTC(c,u>>18|0xF0);PUTC(c,((u>>12)&0x3f)|0x80);PUTC(c,((u>>6)&0x3f)|0x80);PUTC(c,(u&0x3f)|0x80);}
+}
 int json_parse_string(json_text*c,json_value*v){
 	EXPECT(c,'"');
-	const char*p=c->json;size_t pre=c->top,len;
-	while(1){
-		char ch=*p++;
-		switch(ch){
+	const char*p=c->json;char ch;size_t pre=c->top,len;unsigned u,u2;
+	while(1)
+		switch(ch=*p++){
 			case'"':
 				len=c->top-pre,json_set_string(v,(char*)json_text_pop(c,len),len);
-				c->json=p;
-				return JSON_PARSE_OK;
-			case'\0':c->top=pre;return JSON_PARSE_MISS_QUOTATION_MARK;
+				c->json=p;return JSON_PARSE_OK;
+			case'\0':STRING_ERROR(JSON_PARSE_MISS_QUOTATION_MARK);
 			case'\\':
 				switch(*p++){
-					case '"':PUTC(c,'"');break;//"\/bfnrt u
-					case '\\':PUTC(c,'\\');break;
-					case '/':PUTC(c,'/');break;
-					case 'b':PUTC(c,'\b');break;
-					case 'f':PUTC(c,'\f');break;
-					case 'n':PUTC(c,'\n');break;
-					case 'r':PUTC(c,'\r');break;
-					case 't':PUTC(c,'\t');break;
-					default:c->top=pre;return JSON_PARSE_INVALID_STRING_ESCAPE;
+					#define ESCAPE(expect,escape) case expect:PUTC(c,escape);break;
+					ESCAPE('"','"')ESCAPE('\\','\\')ESCAPE('/','/')ESCAPE('b','\b')ESCAPE('f','\f')ESCAPE('n','\n')ESCAPE('r','\r')ESCAPE('t','\t')
+					case 'u':
+						if(!(p=json_parse_hex(p,u)))STRING_ERROR(JSON_PARSE_INVALID_UNICODE_HEX);
+						if(u>=0xD800&&u<=0xDBFF){
+							if(*p++!='\\')STRING_ERROR(JSON_PARSE_INVALID_UNICODE_SURROGATE);
+							if(*p++!='u')STRING_ERROR(JSON_PARSE_INVALID_UNICODE_SURROGATE);
+							if(!(p=json_parse_hex(p,u2)))STRING_ERROR(JSON_PARSE_INVALID_UNICODE_HEX);
+							if(u2>0xDFFF||u2<0xDC00)STRING_ERROR(JSON_PARSE_INVALID_UNICODE_SURROGATE);
+							u=0x10000+(((u-0xD800)<<10)|(u2-0xDC00));
+						}
+						json_utf8(c,u);break;
+					default:STRING_ERROR(JSON_PARSE_INVALID_STRING_ESCAPE);
 				}
 				break;
 			default:
-				if((unsigned char)ch<0x20){c->top=pre;return JSON_PARSE_INVALID_STRING_CHAR;}
+				if((unsigned char)ch<0x20)STRING_ERROR(JSON_PARSE_INVALID_STRING_CHAR);
 				PUTC(c,ch);
 		}
-	}
 }
 int json_parse_value(json_text*c,json_value*v){
 	switch(*c->json){

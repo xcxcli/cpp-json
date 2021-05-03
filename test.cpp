@@ -90,54 +90,92 @@ void parse_string(){
 	TEST_STRING("Hello","\"Hello\"");
 	TEST_STRING("Hello\nWorld","\"Hello\\nWorld\"");
 	TEST_STRING("\" \\ / \b \f \n \r \t","\"\\\" \\\\ \\/ \\b \\f \\n \\r \\t\"");
+	TEST_STRING("Hello\0World","\"Hello\\u0000World\"");
+	TEST_STRING("\x24","\"\\u0024\"");//Dollar sign U+0024
+	TEST_STRING("\xC2\xA2","\"\\u00A2\"");//Cents sign U+00A2
+	TEST_STRING("\xE2\x82\xAC","\"\\u20AC\"");//Euro sign U+20AC
+	TEST_STRING("\xF0\x9D\x84\x9E","\"\\uD834\\uDD1E\"");//G clef sign U+1D11E
+	TEST_STRING("\xF0\x9D\x84\x9E","\"\\ud834\\udd1e\"");
 }
 
-#define TEST_ERROR(error,json)\
+int json_error;
+#define TEST_ERROR(json)\
 	do{\
 		json_value v;json_init(&v);\
-		EXPECT_INT(error,json_parse(&v,json));\
+		EXPECT_INT(json_error,json_parse(&v,json));\
 		EXPECT_INT(JSON_NULL,json_get_type(&v));\
 		json_free(&v);\
 	}while(0)
 void parse_expect_value(){
-	TEST_ERROR(JSON_PARSE_EXPECT_VALUE,"");
-	TEST_ERROR(JSON_PARSE_EXPECT_VALUE," ");
+	json_error=JSON_PARSE_EXPECT_VALUE;
+	TEST_ERROR("");
+	TEST_ERROR(" ");
 }
 void parse_invalid_value(){
-	TEST_ERROR(JSON_PARSE_INVALID_VALUE,"nul");
-	TEST_ERROR(JSON_PARSE_INVALID_VALUE,"?");
-	TEST_ERROR(JSON_PARSE_INVALID_VALUE,"+0");
-	TEST_ERROR(JSON_PARSE_INVALID_VALUE,"+1");
-	TEST_ERROR(JSON_PARSE_INVALID_VALUE,".123");//at least 1 digit before '.'
-	TEST_ERROR(JSON_PARSE_INVALID_VALUE,"1.");//at least 1 digit after '.'
-	TEST_ERROR(JSON_PARSE_INVALID_VALUE,"INF");
-	TEST_ERROR(JSON_PARSE_INVALID_VALUE,"inf");
-	TEST_ERROR(JSON_PARSE_INVALID_VALUE,"NAN");
-	TEST_ERROR(JSON_PARSE_INVALID_VALUE,"nan");
+	json_error=JSON_PARSE_INVALID_VALUE;
+	TEST_ERROR("nul");
+	TEST_ERROR("?");
+	TEST_ERROR("+0");
+	TEST_ERROR("+1");
+	TEST_ERROR(".123");//at least 1 digit before '.'
+	TEST_ERROR("1.");//at least 1 digit after '.'
+	TEST_ERROR("INF");
+	TEST_ERROR("inf");
+	TEST_ERROR("NAN");
+	TEST_ERROR("nan");
 }
 void parse_root_not_singular(){
-	TEST_ERROR(JSON_PARSE_ROOT_NOT_SINGULAR,"null null");
-	TEST_ERROR(JSON_PARSE_ROOT_NOT_SINGULAR,"0123");//after 0 should be '.','E','e' or nothing
-	TEST_ERROR(JSON_PARSE_ROOT_NOT_SINGULAR,"0x0");
-	TEST_ERROR(JSON_PARSE_ROOT_NOT_SINGULAR,"0x123");
+	json_error=JSON_PARSE_ROOT_NOT_SINGULAR;
+	TEST_ERROR("null null");
+	TEST_ERROR("0123");//after 0 should be '.','E','e' or nothing
+	TEST_ERROR("0x0");
+	TEST_ERROR("0x123");
 }
 void parse_number_too_big(){
-	TEST_ERROR(JSON_PARSE_NUMBER_TOO_BIG,"1e309");
-	TEST_ERROR(JSON_PARSE_NUMBER_TOO_BIG,"-1e309");
+	json_error=JSON_PARSE_NUMBER_TOO_BIG;
+	TEST_ERROR("1e309");
+	TEST_ERROR("-1e309");
 }
 void parse_miss_quotation_mark(){
-	TEST_ERROR(JSON_PARSE_MISS_QUOTATION_MARK,"\"");
-	TEST_ERROR(JSON_PARSE_MISS_QUOTATION_MARK,"\"abc");
+	json_error=JSON_PARSE_MISS_QUOTATION_MARK;
+	TEST_ERROR("\"");
+	TEST_ERROR("\"abc");
 }
 void parse_invalid_string_char(){
-	TEST_ERROR(JSON_PARSE_INVALID_STRING_ESCAPE,"\"\\v\"");
-	TEST_ERROR(JSON_PARSE_INVALID_STRING_ESCAPE,"\"\\'\"");
-	TEST_ERROR(JSON_PARSE_INVALID_STRING_ESCAPE,"\"\\0\"");
-	TEST_ERROR(JSON_PARSE_INVALID_STRING_ESCAPE,"\"\\x12\"");
+	json_error=JSON_PARSE_INVALID_STRING_ESCAPE;
+	TEST_ERROR("\"\\v\"");
+	TEST_ERROR("\"\\'\"");
+	TEST_ERROR("\"\\0\"");
+	TEST_ERROR("\"\\x12\"");
 }
 void parse_invalid_string_escape(){
-	TEST_ERROR(JSON_PARSE_INVALID_STRING_CHAR,"\"\x01\"");
-	TEST_ERROR(JSON_PARSE_INVALID_STRING_CHAR,"\"\x1F\"");
+	json_error=JSON_PARSE_INVALID_STRING_CHAR;
+	TEST_ERROR("\"\x01\"");
+	TEST_ERROR("\"\x1F\"");
+}
+void parse_invalid_unicode_hex(){
+	json_error=JSON_PARSE_INVALID_UNICODE_HEX;
+	TEST_ERROR("\"\\u\"");
+	TEST_ERROR("\"\\u0\"");
+	TEST_ERROR("\"\\u01\"");
+	TEST_ERROR("\"\\u012\"");
+	TEST_ERROR("\"\\u/000\"");
+	TEST_ERROR("\"\\uG000\"");
+	TEST_ERROR("\"\\u0/00\"");
+	TEST_ERROR("\"\\u0G00\"");
+	TEST_ERROR("\"\\u00/0\"");
+	TEST_ERROR("\"\\u00G0\"");
+	TEST_ERROR("\"\\u000/\"");
+	TEST_ERROR("\"\\u000G\"");
+	TEST_ERROR("\"\\u 123\"");
+}
+void parse_invalid_unicode_surrogate(){
+	json_error=JSON_PARSE_INVALID_UNICODE_SURROGATE;
+	TEST_ERROR("\"\\uD800\"");
+	TEST_ERROR("\"\\uDBFF\"");
+	TEST_ERROR("\"\\uD800\\\\\"");
+	TEST_ERROR("\"\\uD800\\uDBFF\"");
+	TEST_ERROR("\"\\uD800\\uE000\"");
 }
 void parse(){
 	parse_null();
@@ -153,6 +191,8 @@ void parse(){
 	parse_miss_quotation_mark();
 	parse_invalid_string_char();
 	parse_invalid_string_escape();
+	parse_invalid_unicode_hex();
+	parse_invalid_unicode_surrogate();
 }
 
 void access_null(){
