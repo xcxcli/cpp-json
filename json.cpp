@@ -4,21 +4,18 @@
 #include<errno.h>
 #include<assert.h>
 #include<stdlib.h>
+#include<stdio.h>
 #define EXPECT(c,ch) do{assert(*c->json==ch),++c->json;}while(0)
-#define ISDIGIT(ch) ((ch)>='0'&&(ch)<='9')
-#define ISDIGIT_(ch) ((ch)>'0'&&(ch)<='9')
-
-#ifndef JSON_STACK_INIT_SIZE
-#define JSON_STACK_INIT_SIZE 256
-#endif
 typedef struct json_text{
+	#ifndef JSON_STACK_INIT_SIZE
+	#define JSON_STACK_INIT_SIZE 16
+	#endif
 	const char*json;char*stack;size_t size,top;
 	void*push(size_t sz){
 		assert(sz>0);void*ret;
 		if(top+sz>=size){
 			if(size==0)size=JSON_STACK_INIT_SIZE;
 			while(top+sz>=size)size+=size>>1;
-			//stack=(char*)realloc(stack,size);
 			if(stack==NULL)stack=new char[size];
 			else{
 				char*t=new char[size];
@@ -32,9 +29,14 @@ typedef struct json_text{
 		assert(size>=sz);
 		return stack+(top-=sz);
 	}
+	void print(){
+		printf("--stack-- sz:%d top:%d\n",(int)size,(int)top);
+		for(int i=0;i<(int)top;++i)printf("%x ",(unsigned char)stack[i]);
+		puts("");
+	}
 }json_text;
 
-void json_parse_whitespace(json_text*c){
+void json_parse_ws(json_text*c){
 	const char*p=c->json;
 	while(*p==' '||*p=='\n'||*p=='\t'||*p=='\r')++p;
 	c->json=p;
@@ -59,6 +61,8 @@ const char*json_parse_hex(const char*p,unsigned&u){
 
 int json_parse_value(json_text*c,json_value*v);
 int json_parse_number(json_text*c,json_value*v){
+	#define ISDIGIT(ch) ((ch)>='0'&&(ch)<='9')
+	#define ISDIGIT_(ch) ((ch)>'0'&&(ch)<='9')
 	const char*p=c->json;
 	if(*p=='-')++p;
 	if(*p=='0')++p;
@@ -83,19 +87,19 @@ int json_parse_number(json_text*c,json_value*v){
 	return JSON_PARSE_OK;
 }
 #define PUTC(c,ch) do{*(char*)c->push(1)=(char)(ch);}while(0)
-#define STRING_ERROR(ret) do{c->top=pre;return ret;}while(0)
 void json_utf8(json_text*c,unsigned u){
 	if(u<=0x7F)PUTC(c,u);
 	else if(u<=0x7FF){PUTC(c,u>>6|0xC0);PUTC(c,(u&0x3F)|0x80);}
 	else if(u<=0xFFFF){PUTC(c,u>>12|0xE0);PUTC(c,((u>>6)&0x3f)|0x80);PUTC(c,(u&0x3f)|0x80);}
 	else{assert(u<=0x10FFFF);PUTC(c,u>>18|0xF0);PUTC(c,((u>>12)&0x3f)|0x80);PUTC(c,((u>>6)&0x3f)|0x80);PUTC(c,(u&0x3f)|0x80);}
 }
-int json_parse_string(json_text*c,json_value*v){
-	EXPECT(c,'"');
-	const char*p=c->json;char ch;size_t pre=c->top,len;unsigned u,u2;
+int json_parse_string_raw(json_text*c,char**s,size_t&len){
+	#define STRING_ERROR(ret) do{c->top=pre;return ret;}while(0)
+	EXPECT(c,'"');len=0;
+	const char*p=c->json;char ch;size_t pre=c->top;unsigned u,u2;
 	while(1)switch(ch=*p++){
 		case'"':
-			len=c->top-pre,json_set_string(v,(char*)c->pop(len),len);
+			len=c->top-pre,memcpy(*s=new char[len],c->pop(len),len);
 			c->json=p;return JSON_PARSE_OK;
 		case'\0':STRING_ERROR(JSON_PARSE_MISS_QUOTATION_MARK);
 		case'\\':
@@ -120,8 +124,13 @@ int json_parse_string(json_text*c,json_value*v){
 			PUTC(c,ch);
 	}
 }
+int json_parse_string(json_text*c,json_value*v){
+	char*s;size_t len;int ret=json_parse_string_raw(c,&s,len);
+	if(ret==JSON_PARSE_OK){json_set_string(v,s,len);delete s;}
+	return ret;
+}
 int json_parse_array(json_text*c,json_value*v){
-	EXPECT(c,'[');json_parse_whitespace(c);
+	EXPECT(c,'[');json_parse_ws(c);
 	if(*c->json==']'){
 		++c->json,v->type=JSON_ARRAY,v->u.a={NULL,0};
 		return JSON_PARSE_OK;
@@ -129,9 +138,8 @@ int json_parse_array(json_text*c,json_value*v){
 	int ret;json_value e;size_t sz=0;
 	while(1){
 		if((ret=json_parse_value(c,&e))!=JSON_PARSE_OK)break;
-		memcpy(c->push(JSON_VALUE_SIZE),&e,JSON_VALUE_SIZE);
-		++sz,json_parse_whitespace(c);
-		if(*c->json==','){++c->json,json_parse_whitespace(c);continue;}
+		memcpy(c->push(JSON_VALUE_SIZE),&e,JSON_VALUE_SIZE),++sz,json_parse_ws(c);
+		if(*c->json==','){++c->json,json_parse_ws(c);continue;}
 		else if(*c->json==']'){
 			++c->json,v->type=JSON_ARRAY,v->u.a.size=sz;
 			memcpy(v->u.a.e=new json_value[sz],c->pop(sz*JSON_VALUE_SIZE),sz*JSON_VALUE_SIZE);
@@ -142,6 +150,36 @@ int json_parse_array(json_text*c,json_value*v){
 	while(sz--)json_free((json_value*)c->pop(JSON_VALUE_SIZE));
 	return ret;
 }
+int json_parse_object(json_text*c,json_value*v){
+	EXPECT(c,'{');json_parse_ws(c);
+	if(*c->json=='}'){
+		++c->json,v->type=JSON_OBJECT,v->u.o={NULL,0};
+		return JSON_PARSE_OK;
+	}
+	int ret;json_member m;size_t sz=0;
+	while(1){
+		m.k=NULL;json_init(&m.v);
+		if(*c->json!='"'){ret=JSON_PARSE_MISS_KEY;break;}
+		if((ret=json_parse_string_raw(c,&m.k,m.len))!=JSON_PARSE_OK)break;
+		json_parse_ws(c);
+		if(*c->json!=':'){delete m.k;ret=JSON_PARSE_MISS_COLON;break;}
+		++c->json,json_parse_ws(c);
+		if((ret=json_parse_value(c,&m.v))!=JSON_PARSE_OK){delete m.k;break;}
+		memcpy((char*)c->push(JSON_MEMBER_SIZE),&m,JSON_MEMBER_SIZE),++sz,json_parse_ws(c);
+		if(*c->json==','){++c->json,json_parse_ws(c);continue;}
+		else if(*c->json=='}'){
+			++c->json,v->type=JSON_OBJECT,v->u.o.size=sz;
+			memcpy(v->u.o.m=new json_member[sz],c->pop(sz*JSON_MEMBER_SIZE),sz*JSON_MEMBER_SIZE);
+			return JSON_PARSE_OK;
+		}
+		ret=JSON_PARSE_MISS_COMMA_OR_CURLY_BRACKET;break;
+	}
+	while(sz--){
+		json_member*_m=(json_member*)c->pop(JSON_MEMBER_SIZE);
+		json_free(&_m->v);delete _m->k;
+	}
+	return ret;
+}
 int json_parse_value(json_text*c,json_value*v){
 	switch(*c->json){
 		case'n':return json_parse_literal(c,v,"null",JSON_NULL);
@@ -150,6 +188,7 @@ int json_parse_value(json_text*c,json_value*v){
 		default:return json_parse_number(c,v);
 		case'"':return json_parse_string(c,v);
 		case'[':return json_parse_array(c,v);
+		case'{':return json_parse_object(c,v);
 		case'\0':return JSON_PARSE_EXPECT_VALUE;
 	}
 }
@@ -157,9 +196,9 @@ int json_parse(json_value*v,const char*json){
 	assert(json!=NULL);json_init(v);
 	json_text c;int ret;
 	c.json=json,c.stack=NULL,c.size=c.top=0,v->type=JSON_NULL;
-	json_parse_whitespace(&c);
+	json_parse_ws(&c);
 	if((ret=json_parse_value(&c,v))==JSON_PARSE_OK){
-		json_parse_whitespace(&c);
+		json_parse_ws(&c);
 		if(*c.json!='\0')ret=JSON_PARSE_ROOT_NOT_SINGULAR,v->type=JSON_NULL;
 	}
 	assert(c.top==0),delete c.stack;
@@ -169,10 +208,18 @@ int json_parse(json_value*v,const char*json){
 void json_free(json_value*v){
 	assert(v!=NULL);
 	if(v->type==JSON_STRING)delete v->u.s.s;
-	if(v->type==JSON_ARRAY){
-		size_t t=json_get_array_size(v);
-		while(t--)json_free(json_get_array_element(v,t));
+	else if(v->type==JSON_ARRAY){
+		size_t t=v->u.a.size;
+		while(t--)json_free(v->u.a.e+t);
 		delete v->u.a.e;
+	}
+	else if(v->type==JSON_OBJECT){
+		size_t t=v->u.o.size;
+		while(t--){
+			json_member*m=v->u.o.m+t;
+			delete m->k;json_free(&m->v);
+		}
+		delete v->u.o.m;
 	}
 	v->type=JSON_NULL;
 }
@@ -190,10 +237,7 @@ void json_set_string(json_value*v,const char*s,size_t len){
 	v->u.s.len=len,v->type=JSON_STRING;
 }
 
-json_type json_get_type(const json_value*v){
-	assert(v!=NULL);
-	return v->type;
-}
+json_type json_get_type(const json_value*v){assert(v!=NULL);return v->type;}
 double json_get_number(const json_value*v){
 	assert(v!=NULL&&v->type==JSON_NUMBER);
 	return v->u.n;
@@ -206,11 +250,27 @@ size_t json_get_string_length(const json_value*v){
 	assert(v!=NULL&&v->type==JSON_STRING);
 	return v->u.s.len;
 }
-json_value*json_get_array_element(const json_value*v,size_t index){
-	assert(v!=NULL&&v->type==JSON_ARRAY&&index<v->u.a.size);
-	return v->u.a.e+index;
-}
 size_t json_get_array_size(const json_value*v){
 	assert(v!=NULL&&v->type==JSON_ARRAY);
 	return v->u.a.size;
 }
+json_value*json_get_array_element(const json_value*v,size_t index){
+	assert(v!=NULL&&v->type==JSON_ARRAY&&index<v->u.a.size);
+	return v->u.a.e+index;
+}
+size_t json_get_object_size(const json_value*v){
+	assert(v!=NULL&&v->type==JSON_OBJECT);
+	return v->u.o.size;
+}
+const char*json_get_object_key(const json_value*v,size_t index){
+	assert(v!=NULL&&v->type==JSON_OBJECT&&index<v->u.o.size);
+	return v->u.o.m[index].k;
+}
+size_t json_get_object_key_length(const json_value*v,size_t index){
+	assert(v!=NULL&&v->type==JSON_OBJECT&&index<v->u.o.size);
+	return v->u.o.m[index].len;
+};
+json_value*json_get_object_value(const json_value*v,size_t index){
+	assert(v!=NULL&&v->type==JSON_OBJECT&&index<v->u.o.size);
+	return &v->u.o.m[index].v;
+};

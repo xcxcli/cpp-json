@@ -106,7 +106,7 @@ void parse_array(){
 	json_free(&v);
 
 	json_init(&v);
-	EXPECT_INT(JSON_PARSE_OK,json_parse(&v," [ null , false , true , 123 , \"abc\" ] "));
+	EXPECT_INT(JSON_PARSE_OK,json_parse(&v," [ null ,false , true , 123 , \"abc\" ] "));
 	EXPECT_INT(JSON_ARRAY,json_get_type(&v));
 	EXPECT_SIZE_T(5,json_get_array_size(&v));
 	EXPECT_INT(JSON_NULL,json_get_type(json_get_array_element(&v,0)));
@@ -134,6 +134,62 @@ void parse_array(){
 	}
 	json_free(&v);
 }
+void parse_object(){
+	json_value v;size_t i;json_init(&v);
+	EXPECT_INT(JSON_PARSE_OK,json_parse(&v," { } "));
+	EXPECT_INT(JSON_OBJECT,json_get_type(&v));
+	EXPECT_SIZE_T(0,json_get_object_size(&v));
+	json_free(&v);
+
+	json_init(&v);
+	EXPECT_INT(JSON_PARSE_OK,json_parse(&v,
+		" { "
+		" \"n\" : null , "
+		" \"f\" : false , "
+		" \"t\" : true , "
+		" \"i\" : 123 , "
+		" \"s\" : \"abc\" , "
+		" \"a\" : [ 1 , 2 , 3 ] , "
+		" \"o\" : { \"1\" : 1 , \"2\" : 2 , \"3\" : 3 } "
+		" } "
+	));
+	EXPECT_INT(JSON_OBJECT,json_get_type(&v));
+	EXPECT_SIZE_T(7,json_get_object_size(&v));
+	EXPECT_STRING("n",json_get_object_key(&v,0),json_get_object_key_length(&v,0));
+	EXPECT_INT(JSON_NULL,json_get_type(json_get_object_value(&v,0)));
+	EXPECT_STRING("f",json_get_object_key(&v,1),json_get_object_key_length(&v,1));
+	EXPECT_INT(JSON_FALSE,json_get_type(json_get_object_value(&v,1)));
+	EXPECT_STRING("t",json_get_object_key(&v,2),json_get_object_key_length(&v,2));
+	EXPECT_INT(JSON_TRUE,json_get_type(json_get_object_value(&v,2)));
+	EXPECT_STRING("i",json_get_object_key(&v,3),json_get_object_key_length(&v,3));
+	EXPECT_INT(JSON_NUMBER,json_get_type(json_get_object_value(&v,3)));
+	EXPECT_DOUBLE(123.0,json_get_number(json_get_object_value(&v,3)));
+	EXPECT_STRING("s",json_get_object_key(&v,4),json_get_object_key_length(&v,4));
+	EXPECT_INT(JSON_STRING,json_get_type(json_get_object_value(&v,4)));
+	EXPECT_STRING("abc",json_get_string(json_get_object_value(&v,4)),json_get_string_length(json_get_object_value(&v,4)));
+	EXPECT_STRING("a",json_get_object_key(&v,5),json_get_object_key_length(&v,5));
+	
+	EXPECT_INT(JSON_ARRAY,json_get_type(json_get_object_value(&v,5)));
+	EXPECT_SIZE_T(3,json_get_array_size(json_get_object_value(&v,5)));
+	for(i=0;i<3;i++){
+		json_value*e=json_get_array_element(json_get_object_value(&v,5),i);
+		EXPECT_INT(JSON_NUMBER,json_get_type(e));
+		EXPECT_DOUBLE(i+1.0,json_get_number(e));
+	}
+	EXPECT_STRING("o",json_get_object_key(&v,6),json_get_object_key_length(&v,6));
+
+	json_value*o=json_get_object_value(&v,6);
+	EXPECT_INT(JSON_OBJECT,json_get_type(o));
+	for(i=0;i<3;i++){
+		json_value*ov=json_get_object_value(o,i);
+		EXPECT_TRUE('1'+(char)i==json_get_object_key(o,i)[0]?JSON_TRUE:JSON_FALSE);
+		EXPECT_SIZE_T(1,json_get_object_key_length(o,i));
+		EXPECT_INT(JSON_NUMBER,json_get_type(ov));
+		EXPECT_DOUBLE(i+1.0,json_get_number(ov));
+	}
+	json_free(&v);
+}
+
 
 int json_error;
 #define TEST_ERROR(json)\
@@ -223,6 +279,33 @@ void parse_miss_comma_or_square_bracket(){
 	TEST_ERROR("[1 2");
 	TEST_ERROR("[[]");
 }
+void parse_miss_key(){
+	json_error=JSON_PARSE_MISS_KEY;
+	TEST_ERROR("{:1,");
+	TEST_ERROR("{1:1,");
+	TEST_ERROR("{true:1,");
+	TEST_ERROR("{false:1,");
+	TEST_ERROR("{null:1,");
+	TEST_ERROR("{[]:1,");
+	TEST_ERROR("{{}:1,");
+	TEST_ERROR("{\"a\":1,");
+	TEST_ERROR("{\"n\":null,\"f\":false,\"t\":true,\"i\":123,\"s\":\"abc\",\"a\":[1,2,3],\"o\":{\"1\":1,\"2\":2,}}");
+}
+void parse_miss_colon(){
+	json_error=JSON_PARSE_MISS_COLON;
+	TEST_ERROR("{\"a\"}");
+	TEST_ERROR("{\"a\",\"b\"}");
+	TEST_ERROR("{\"a\":1,\"b\"}");
+	TEST_ERROR("{\"n\":null,\"f\":false,\"t\":true,\"i\":123,\"s\":\"abc\",\"a\":[1,2,3],\"o\":{\"1\":1,\"2\":2,\"3\"3}}");
+}
+void parse_miss_comma_or_curly_bracket(){
+	json_error=JSON_PARSE_MISS_COMMA_OR_CURLY_BRACKET;
+	TEST_ERROR("{\"a\":1");
+	TEST_ERROR("{\"a\":1]");
+	TEST_ERROR("{\"a\":1 \"b\"");
+	TEST_ERROR("{\"a\":{}");
+	TEST_ERROR("{\"n\":null,\"f\":false,\"t\":true,\"i\":123,\"s\":\"abc\",\"a\":[1,2,3],\"o\":{\"1\":1,\"2\":2,\"3\":3}");
+}
 void parse(){
 	parse_null();
 	parse_true();
@@ -230,6 +313,7 @@ void parse(){
 	parse_number();
 	parse_string();
 	parse_array();
+	parse_object();
 
 	parse_expect_value();
 	parse_invalid_value();
@@ -241,6 +325,9 @@ void parse(){
 	parse_invalid_unicode_hex();
 	parse_invalid_unicode_surrogate();
 	parse_miss_comma_or_square_bracket();
+	parse_miss_key();
+	parse_miss_colon();
+	parse_miss_comma_or_curly_bracket();
 }
 
 void access_null(){
