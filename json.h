@@ -31,10 +31,14 @@ enum{
 	JSON_PARSE_MISS_COLON,
 	JSON_PARSE_MISS_COMMA_OR_CURLY_BRACKET
 };
+enum{
+	JSON_STRINGIFY_OK=0
+};
 
 #define json_init(v) do{(v)->type=JSON_NULL;}while(0)
 void json_free(json_value*v);
 int json_parse(json_value*v,const char*json);
+int json_stringify(const json_value*v,char**json,size_t*len);
 
 #define json_set_null(v) json_free(v)
 void json_set_boolean(json_value*v,bool b);

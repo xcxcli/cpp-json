@@ -29,11 +29,6 @@ typedef struct json_text{
 		assert(size>=sz);
 		return stack+(top-=sz);
 	}
-	void print(){
-		printf("--stack-- sz:%d top:%d\n",(int)size,(int)top);
-		for(int i=0;i<(int)top;++i)printf("%x ",(unsigned char)stack[i]);
-		puts("");
-	}
 }json_text;
 
 void json_parse_ws(json_text*c){
@@ -86,7 +81,7 @@ int json_parse_number(json_text*c,json_value*v){
 	c->json=p,v->type=JSON_NUMBER;
 	return JSON_PARSE_OK;
 }
-#define PUTC(c,ch) do{*(char*)c->push(1)=(char)(ch);}while(0)
+#define PUTC(c,ch) do{*(char*)(c)->push(1)=(char)(ch);}while(0)
 void json_utf8(json_text*c,unsigned u){
 	if(u<=0x7F)PUTC(c,u);
 	else if(u<=0x7FF){PUTC(c,u>>6|0xC0);PUTC(c,(u&0x3F)|0x80);}
@@ -106,6 +101,7 @@ int json_parse_string_raw(json_text*c,char**s,size_t&len){
 			switch(*p++){
 				#define ESCAPE(expect,escape) case expect:PUTC(c,escape);break;
 				ESCAPE('"','"')ESCAPE('\\','\\')ESCAPE('/','/')ESCAPE('b','\b')ESCAPE('f','\f')ESCAPE('n','\n')ESCAPE('r','\r')ESCAPE('t','\t')
+				#undef ESCAPE
 				case 'u':
 					if(!(p=json_parse_hex(p,u)))STRING_ERROR(JSON_PARSE_INVALID_UNICODE_HEX);
 					if(u>=0xD800&&u<=0xDBFF){
@@ -203,6 +199,63 @@ int json_parse(json_value*v,const char*json){
 	}
 	assert(c.top==0),delete c.stack;
 	return ret;
+}
+
+#define PUTS(c,s,len) memcpy((char*)c->push(len),s,len)
+int json_stringify_value(json_text*c,const json_value*v);
+void json_stringify_string(json_text*c,const char*s,size_t len){
+	assert(s!=NULL);PUTC(c,'"');unsigned char ch;
+	for(size_t i=0;i<len;++i)
+		switch(ch=(unsigned char)s[i]){
+			#define ESCAPE(expect,escape) case expect:PUTS(c,escape,2);break;
+			ESCAPE('"',"\\\"")ESCAPE('\\',"\\\\")ESCAPE('\b',"\\b")ESCAPE('\f',"\\f")ESCAPE('\n',"\\n")ESCAPE('\r',"\\r")ESCAPE('\t',"\\t")
+			#undef ESCAPE
+			default:
+				if(ch<0x20){
+					char buffer[7];
+					sprintf(buffer,"\\u%04X",ch);
+					PUTS(c,buffer,6);
+				}
+				else PUTC(c,ch);
+		}
+	PUTC(c,'"');
+}
+int json_stringify_value(json_text*c,const json_value*v){
+	switch(v->type){
+		case JSON_NULL:PUTS(c,"null",4);break;
+		case JSON_TRUE:PUTS(c,"true",4);break;
+		case JSON_FALSE:PUTS(c,"false",5);break;
+		case JSON_NUMBER:c->top-=32-sprintf((char*)c->push(32),"%.17g",v->u.n);break;
+		case JSON_STRING:json_stringify_string(c,v->u.s.s,v->u.s.len);break;
+		case JSON_ARRAY:{
+			PUTC(c,'[');
+			size_t i=0,sz=v->u.a.size;const json_value*t=v->u.a.e;
+			for(;i<sz;++i,++t){
+				json_stringify_value(c,t);
+				if(i+1!=sz)PUTC(c,',');
+			}
+			PUTC(c,']');break;
+		}
+		case JSON_OBJECT:{
+			PUTC(c,'{');
+			size_t i=0,sz=v->u.o.size;const json_member*t=v->u.o.m;
+			for(;i<sz;++i,++t){
+				json_stringify_string(c,t->k,t->len);PUTC(c,':');json_stringify_value(c,&t->v);
+				if(i+1!=sz)PUTC(c,',');
+			}
+			PUTC(c,'}');break;
+		}
+	}
+	return JSON_STRINGIFY_OK;
+}
+int json_stringify(const json_value*v,char**json,size_t*len){
+	assert(v!=NULL&&json!=NULL);
+	json_text c;int ret;
+	c.stack=new char[c.size=JSON_STACK_INIT_SIZE],c.top=0;
+	if((ret=json_stringify_value(&c,v))!=JSON_STRINGIFY_OK)delete c.stack;
+	if(len)*len=c.top;
+	PUTC(&c,'\0');*json=c.stack;
+	return JSON_STRINGIFY_OK;
 }
 
 void json_free(json_value*v){

@@ -367,9 +367,66 @@ void access(){
 	access_string();
 }
 
+#define TEST_STRINGIFY(json)\
+	do{\
+		json_value v;char*tmp;size_t len;json_init(&v);\
+		EXPECT_INT(JSON_PARSE_OK,json_parse(&v,json));\
+		EXPECT_INT(JSON_STRINGIFY_OK,json_stringify(&v,&tmp,&len));\
+		EXPECT_STRING(json,tmp,len);\
+		json_free(&v);delete tmp;\
+	}while(0)
+void stringify_basic(){
+	TEST_STRINGIFY("null");
+	TEST_STRINGIFY("true");
+	TEST_STRINGIFY("false");
+}
+void stringify_number(){
+	TEST_STRINGIFY("0");
+	TEST_STRINGIFY("-0");
+	TEST_STRINGIFY("1");
+	TEST_STRINGIFY("-1");
+	TEST_STRINGIFY("1.5");
+	TEST_STRINGIFY("-1.5");
+	TEST_STRINGIFY("3.25");
+	TEST_STRINGIFY("1e+20");
+	TEST_STRINGIFY("1.234e+20");
+	TEST_STRINGIFY("1.234e-20");
+	TEST_STRINGIFY("1.0000000000000002");//the smallest number > 1
+	TEST_STRINGIFY("4.9406564584124654e-324");//minimum denormal
+	TEST_STRINGIFY("-4.9406564584124654e-324");
+	TEST_STRINGIFY("2.2250738585072009e-308");//Max subnormal double
+	TEST_STRINGIFY("-2.2250738585072009e-308");
+	TEST_STRINGIFY("2.2250738585072014e-308");//Min normal positive double
+	TEST_STRINGIFY("-2.2250738585072014e-308");
+	TEST_STRINGIFY("1.7976931348623157e+308");//Max double
+	TEST_STRINGIFY("-1.7976931348623157e+308");
+}
+void stringify_string(){
+	TEST_STRINGIFY("\"\"");
+	TEST_STRINGIFY("\"Hello\"");
+	TEST_STRINGIFY("\"Hello\\nWorld\"");
+	TEST_STRINGIFY("\"\\\" \\\\ / \\b \\f \\n \\r \\t\"");
+	TEST_STRINGIFY("\"Hello\\u0000World\"");
+}
+void stringify_array(){
+	TEST_STRINGIFY("[]");
+	TEST_STRINGIFY("[null,false,true,123,\"abc\",[1,2,3]]");
+}
+void stringify_object(){
+	TEST_STRINGIFY("{}");
+	TEST_STRINGIFY("{\"n\":null,\"f\":false,\"t\":true,\"i\":123,\"s\":\"abc\",\"a\":[1,2,3],\"o\":{\"1\":1,\"2\":2,\"3\":3}}");
+}
+void stringify(){
+	stringify_basic();
+	stringify_number();
+	stringify_string();
+	stringify_array();
+	stringify_object();
+}
+
 int main(){
 	clock_t t=clock();
-	parse(),access();
+	parse(),access(),stringify();
 	printf("test:%d passed:%d time:%dms\n",cnt,pass,int(clock()-t));
 	return ret;
 }
